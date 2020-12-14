@@ -1,0 +1,278 @@
+---
+title: "Short Term Business 2016-2019"
+author: "Amal Almutairy"
+date: "12/7/2020"
+output: 
+  html_document:
+    theme: journal
+    highlight: tango
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Industry and business 
+
+[Methodology of Short Term Business Statistics](https://www.stats.gov.sa/en/888)
+[Data source](https://www.stats.gov.sa/en/888) 
+```{r packages, echo=FALSE}
+#most of the libraries needed
+library(ggthemes)
+library(viridis)
+library(tidyr)
+library(cluster)
+library(ggmap)
+library(maps) 
+library(tidyverse)
+library(vroom)
+library(rsample)
+library(caret) 
+library(MASS)
+library(ggpubr)
+library(readr)
+library(Hmisc)
+library(dplyr)
+library(ggplot2)
+library(recipes)
+library(funModeling) 
+```
+
+# Short Term Business Statistics
+```{r, echo=FALSE}
+# read the data 
+business <- read_csv("data/Short Term Business 2016-2019.csv")
+
+glimpse(business)
+
+Revenues <- business$Revenues
+Expendetures <- business$Expendetures
+Time <- business$Time
+EActivity <- business$`Economic activity`
+```
+
+
+```{r, echo=FALSE}
+summary(business)
+dim(business)
+str(business)
+```
+
+## Plot the frequency of business
+```{r, echo=FALSE}
+freq(business)
+```
+
+## Plot the frequency of business revenue 
+```{r, echo=FALSE}
+# business
+freq(business$Revenues)
+freq(business$Revenues, path_out = ".")
+```
+
+# business Establishments Density Spread
+```{r, echo=FALSE}
+
+summary(business$`Economic activity`)
+
+# Plot
+hist(log(Revenues))
+hist(log(Expendetures))
+
+
+boxplot(Revenues ~ Time)
+
+NonSaudi <- business$`Non-Saudi`
+Saudi <- business$Saudi
+Total <- business$Total
+
+hist(log(Total))
+boxplot(Total ~ NonSaudi + Saudi)
+```
+
+```{r, echo=FALSE}
+# split, train and test the data 
+set.seed(123) # for reproducibility
+bsplit <- initial_split(business, strata = "Expendetures", prop = 0.7)
+btrain <- training(bsplit)
+btest  <- testing(bsplit) 
+
+
+# Do the distributions line up? 
+ggplot(btrain, aes(x = Revenues)) + 
+  geom_line(stat = "density", 
+            trim = TRUE) + 
+  geom_line(data = btest, 
+            stat = "density", 
+            trim = TRUE, col = "red")
+
+```
+## Feature engineering
+```{r, echo=FALSE}
+visdat::vis_miss(business, cluster = TRUE)
+
+caret::nearZeroVar(business, saveMetrics= TRUE) %>% 
+  rownames_to_column() %>% 
+  filter(nzv)
+```
+
+
+```{r, echo=FALSE}
+# Feature engineering
+blueprint <- recipe(Revenues ~ Expendetures, data = business) %>%
+  step_nzv(all_nominal()) %>%
+  step_integer(matches("Qual|Cond|QC|Qu")) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE)
+
+# prepare blueprint
+prepare <- prep(blueprint, training = business)
+prepare
+
+# Bake
+baked_train <- bake(prepare, new_data = business)
+baked_test <- bake(prepare, new_data = business)
+
+baked_train
+```
+
+
+```{r, echo=FALSE}
+# create a re-sampling method
+cv <- trainControl(
+  method = "repeatedcv", 
+  number = 10, 
+  repeats = 5
+  )
+ 
+# create a hyperparameter grid search
+hyper_grid <- expand.grid(k = seq(2, 25, by = 1))
+
+# execute grid search with knn model
+# use RMSE as preferred metric
+knn_fit <- train(
+  blueprint, 
+  data = btrain, 
+  method = "knn", 
+  trControl = cv, 
+  tuneGrid = hyper_grid,
+  metric = "RMSE"
+  )
+# 6. evaluate results
+# print model results
+knn_fit
+
+
+ggplot(knn_fit)
+```
+
+
+
+```{r, echo=FALSE}
+# plot cross validation results
+ggplot(knn_fit$results, aes(k, RMSE)) + 
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(labels = scales::dollar)  
+```
+
+```{r, echo=FALSE}
+ggplot(business, aes(Time, Revenues)) +
+  geom_abline() +
+  stat_summary(fun.data = mean_sdl, 
+               fun.args = list(mult = 1), 
+               col = "blue")
+```
+```{r, echo=FALSE}
+
+
+ggplot(business, aes(x = Total, fill = Saudi)) +
+  theme_bw() +  
+  facet_wrap(~ Time) +
+  geom_boxplot() +
+  labs(y = "progress of hiring saudis",
+       title = "Saudization")
+
+```
+```{r, echo=FALSE}
+cor(Time, Revenues, method = c("pearson", "kendall", "spearman"))
+cor.test(Time, Revenues, method=c("pearson", "kendall", "spearman"))
+```
+
+```{r, echo=FALSE}
+
+# Q-Q plots 
+
+# TRevenues
+ggqqplot(Revenues, ylab = "Revenues")
+# Year
+ggqqplot(Time, ylab = "Time")
+```
+
+```{r, echo=FALSE}
+C1 <- cor.test(Revenues, Expendetures, 
+                    method = "pearson")
+C1
+
+# Extract the p.value
+C1$p.value
+
+# Extract the correlation coefficient
+C1$estimate
+
+```
+
+```{r, echo=FALSE}
+C2 <- cor.test(Revenues, Expendetures,  method="kendall")
+C2
+
+```
+
+
+## Linear regression
+```{r, echo=FALSE}
+model <- lm(Total ~ `Non-Saudi` + Saudi , data = business)
+model
+
+```
+# mode accuracy
+```{r, echo=FALSE}
+# create a resampling method
+cv <- trainControl(
+  method = "repeatedcv", 
+  number = 10, 
+  repeats = 5
+  )
+
+# model CV
+set.seed(123)
+cv_model1 <- train(
+  Total ~ `Non-Saudi` + Saudi, 
+  data = btrain, 
+  method = "lm", 
+  trControl = cv)
+
+
+
+set.seed(123)
+cv_model2 <- train(
+  Revenues ~ Expendetures + Comensation, 
+  data = btrain, 
+  method = "lm",
+  trControl = cv
+  )
+
+
+
+summary(resamples(list(
+  model2 <- cv_model1, 
+  model3 <- cv_model2)))$statistics$Accuracy
+
+```
+
+
+

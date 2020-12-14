@@ -1,0 +1,303 @@
+---
+title: "Tourism"
+author: "Amal Almutairy"
+date: "11-10-2020"
+output: 
+  html_document:
+    theme: journal
+    highlight: tango
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+---
+## packages
+```{r, echo=FALSE}
+# packages required
+library(dplyr)
+library(ggplot2)
+library(rsample)
+library(recipes)
+library(caret)
+library(funModeling) 
+library(tidyverse) 
+library(Hmisc)
+library(ggsci)
+library(ggpubr)
+```
+
+
+# data source
+[Tourism Establishments Survey](https://www.stats.gov.sa/en/491-0)
+
+## Tourism Establishments Survey
+```{r , echo=FALSE}
+library(readr)
+Tourism <- read_csv("data/tourism.csv")
+
+summary(Tourism)
+dim(Tourism)
+str(Tourism)
+
+
+tourism1=Tourism %>% select(Year, `T-Revenues`, `T-Expendetures`, `T-Comensation`, `T-Total`)
+
+jobs=Tourism %>% select(Year, `Tourist Economic Activity`, `T-Saudi`, `T-Non-Saudi`, `Saudi-Male`, `Saudi-Female`, `Non-Saudi-Male`, `Non-Saudi-Female`)
+
+
+```
+
+
+## Tourism (T.Revenues)
+```{r, echo=FALSE}
+glimpse(tourism1)
+
+glimpse(jobs)
+```
+
+
+```{r, echo=FALSE}
+status(tourism1)
+status(jobs)
+```
+## Plot the frequency of Tourism
+```{r, echo=FALSE}
+freq(tourism1)
+freq(jobs)
+
+# Jitter plot 
+ggplot(Tourism, aes(`T-Revenues`, `T-Expendetures`)) +
+  geom_jitter(width = 015) +
+  stat_summary(fun.data = mean_sdl, 
+               fun.args = list(mult = 0.5), 
+               col = "red") 
+```
+
+## Plot the frequency of Tourism revenue 
+```{r, echo=FALSE}
+# tourism
+freq(Tourism$`Tourist Economic Activity`)
+freq(Tourism$`Tourist Economic Activity`, path_out = ".")
+
+# jobs
+freq(jobs$`Tourist Economic Activity`)
+freq(jobs$`Tourist Economic Activity`, path_out = ".")
+```
+
+## Plot the frequency of Tourism per year 
+```{r, echo=FALSE}
+# tourism
+freq(tourism1$Year)
+freq(tourism1$Year, path_out = ".")
+
+# jobs
+freq(jobs$Year)
+freq(jobs$Year, path_out = ".")
+```
+
+# Tourism Establishments Density Spread
+```{r, echo=FALSE}
+TRevenues <- Tourism$`T-Revenues`
+TExpendetures <- Tourism$`T-Expendetures`
+Year <- Tourism$Year
+EActivity <- tourism1$`Tourist Economic Activity`
+
+summary(Tourism$Establishments)
+
+# Plot
+hist(log(TRevenues))
+hist(log(TExpendetures))
+
+
+boxplot(TRevenues ~ Year)
+boxplot(TRevenues ~ TExpendetures)
+```
+
+```{r}
+# split, train and test the data 
+set.seed(123) # for reproducibility
+split <- initial_split(Tourism, strata = "T-Revenues", prop = 0.7)
+train <- training(split)
+test  <- testing(split) 
+
+
+# Do the distributions line up? 
+ggplot(train, aes(x = `T-Revenues`)) + 
+  geom_line(stat = "density", 
+            trim = TRUE) + 
+  geom_line(data = test, 
+            stat = "density", 
+            trim = TRUE, col = "red")
+
+```
+## Feature engineering
+```{r, echo=FALSE}
+visdat::vis_miss(Tourism, cluster = TRUE)
+
+caret::nearZeroVar(Tourism, saveMetrics= TRUE) %>% 
+  rownames_to_column() %>% 
+  filter(nzv)
+```
+
+
+```{r, echo=FALSE}
+
+# 1. stratified sampling with the rsample package
+set.seed(123)
+rsplit  <- initial_split(Tourism, prop = 0.7)
+rtrain  <- training(rsplit)
+rtest   <- testing(rsplit)
+
+# 2. Feature engineering
+blueprint <- recipe(`T-Revenues` ~ `T-Expendetures`, data = Tourism) %>%
+  step_nzv(all_nominal()) %>%
+  step_integer(matches("Qual|Cond|QC|Qu")) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE)
+
+# prepare blueprint
+prepare <- prep(blueprint, training = Tourism)
+prepare
+
+# Bake
+baked_train <- bake(prepare, new_data = Tourism)
+baked_test <- bake(prepare, new_data = Tourism)
+
+baked_train
+```
+
+
+```{r, echo=FALSE}
+
+# 3. create a re-sampling method
+cv <- trainControl(
+  method = "repeatedcv", 
+  number = 10, 
+  repeats = 5
+  )
+ 
+# 4. create a hyperparameter grid search
+hyper_grid <- expand.grid(k = seq(2, 25, by = 1))
+
+# 5. execute grid search with knn model
+#    use RMSE as preferred metric
+knn_fit <- train(
+  blueprint, 
+  data = rtrain, 
+  method = "knn", 
+  trControl = cv, 
+  tuneGrid = hyper_grid,
+  metric = "RMSE"
+  )
+# 6. evaluate results
+# print model results
+knn_fit
+
+plot(knn_fit)
+```
+
+
+
+```{r, echo=FALSE}
+# plot cross validation results
+ggplot(knn_fit$results, aes(k, RMSE)) + 
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(labels = scales::dollar)  
+```
+
+```{r, echo=FALSE}
+ggplot(jobs, aes(Year, `T-Non-Saudi`)) +
+  geom_abline() +
+  stat_summary(fun.data = mean_sdl, 
+               fun.args = list(mult = 1), 
+               col = "blue")
+```
+
+
+```{r, echo=FALSE}
+ggplot(jobs, aes(Year, `T-Saudi`)) +
+  geom_abline() +
+  stat_summary(fun.data = mean_sdl, 
+               fun.args = list(mult = 1), 
+               col = "red")
+```
+
+```{r, echo=FALSE}
+ggplot(tourism1, aes(Year, `T-Total`)) +
+  geom_abline() +
+  stat_summary(fun.data = mean_sdl, 
+               fun.args = list(mult = 1), 
+               col = "red")
+
+```
+
+```{r, echo=FALSE}
+TRevenues <- Tourism$`T-Revenues`
+mean(TRevenues)
+Tourism %>% filter(TRevenues > 5103935)
+
+```
+
+```{r, echo=FALSE}
+tourism.cor <- cor(tourism1)
+
+cor(Tourism$`T-Total`, TRevenues, method = c("pearson", "kendall", "spearman"))
+cor.test(Tourism$`T-Total`, TRevenues, method=c("pearson", "kendall", "spearman"))
+
+plot(tourism.cor)
+```
+
+```{r, echo=FALSE}
+library("ggpubr")
+
+# Q-Q plots 
+
+# TRevenues
+ggqqplot(Tourism$`T-Revenues`, ylab = "TRevenues")
+# Year
+ggqqplot(Tourism$Year, ylab = "Year")
+```
+
+```{r, echo=FALSE}
+C1 <- cor.test(Tourism$`T-Revenues`, Tourism$`T-Expendetures`, 
+                    method = "pearson")
+C1
+
+
+#In the result:
+#Tourism$`T-Revenues` and Tourism$`T-Expendetures`
+#t = 123.53, df = 209, p-value < 2.2e-16
+#alternative hypothesis: true correlation is not equal to 0
+#95 percent confidence interval:
+# 0.9911144 0.9948309
+#sample estimates:
+#      cor 
+#0.9932219
+
+# Extract the p.value
+C1$p.value
+# 2.502514e-197
+
+
+# Extract the correlation coefficient
+C1$estimate
+# 0.9932219 
+```
+
+```{r, echo=FALSE}
+C2 <- cor.test(Tourism$`T-Revenues`, Tourism$`T-Expendetures`,  method="kendall")
+C2
+
+#Kendall's rank correlation tau
+#data:  Tourism$`T-Revenues` and Tourism$`T-Expendetures`
+#z = 20.148, p-value < 2.2e-16
+#alternative hypothesis: true tau is not equal to 0
+#sample estimates:
+#      tau 
+#0.9332249 
+
+```
+
+
