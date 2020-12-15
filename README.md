@@ -1,5 +1,5 @@
-## Capstone-project
-
+## Capstone project
+Business and Tourism in Saudi Arabia Capstone
 
 ## About:
 Tourism has a positive impact upon economic growth and development. It provide jobs, income and increase the level of economic activity in a country.
